@@ -10,11 +10,10 @@ local function install_windows(install_path, version)
         error("Failed to download the Poetry installer: " .. (err or ("HTTP " .. resp.status_code)))
     end
 
-    -- Same patch as the unix path: build the installer's venv with symlinks
-    local installer, count = resp.body:gsub("symlinks=False", "symlinks=True")
-    if count == 0 then
-        io.stderr:write("warning: could not patch the Poetry installer to use symlinks\n")
-    end
+    -- Unlike the unix path, keep the installer's symlinks=False: on Windows that gives the
+    -- venv a launcher redirector, while symlinks would leave a python.exe that cannot find
+    -- its DLLs unless the base Python is on PATH.
+    local installer = resp.body
 
     local script_path = install_path .. "\\install-poetry.py"
     local f = io.open(script_path, "wb")
