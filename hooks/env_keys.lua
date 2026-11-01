@@ -24,6 +24,16 @@ local function get_mise_python_path_prefix()
     return ""
 end
 
+--- mise caches the result of EnvKeys; name the files it depends on so mise
+--- runs the hook again when one changes. mise.cache is a mise addition that
+--- the vfox CLI and older mise releases lack.
+local function watch_files(paths)
+    local ok, cache = pcall(require, "mise.cache")
+    if ok then
+        cache.watch_files(paths)
+    end
+end
+
 function PLUGIN:EnvKeys(ctx)
     local file = require("file")
     local bin_path = file.join_path(ctx.path, "bin")
@@ -50,6 +60,7 @@ function PLUGIN:EnvKeys(ctx)
     if project_root and pyproject:sub(1, 1) ~= "/" then
         pyproject = project_root .. "/" .. pyproject
     end
+    watch_files({ pyproject })
 
     -- Check if pyproject.toml exists
     local f = io.open(pyproject, "r")
@@ -62,6 +73,7 @@ function PLUGIN:EnvKeys(ctx)
     if not pyproject_dir then
         pyproject_dir = "."
     end
+    watch_files({ pyproject_dir .. "uv.lock", pyproject_dir .. "poetry.lock" })
 
     -- Check for uv.lock - if present, let uv manage the venv
     local uv_lock = io.open(pyproject_dir .. "uv.lock", "r")
@@ -121,6 +133,7 @@ function PLUGIN:EnvKeys(ctx)
     end
 
     -- Set virtualenv environment variables
+    watch_files({ venv_path })
     table.insert(env_keys, { key = "POETRY_ACTIVE", value = "1" })
     table.insert(env_keys, { key = "VIRTUAL_ENV", value = venv_path })
     table.insert(
