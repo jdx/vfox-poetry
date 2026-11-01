@@ -34,6 +34,15 @@ local function watch_files(paths)
     end
 end
 
+--- Have mise run EnvKeys again every time, for a result that depends on
+--- something it can't watch.
+local function disable_cache()
+    local ok, cache = pcall(require, "mise.cache")
+    if ok then
+        cache.disable()
+    end
+end
+
 function PLUGIN:EnvKeys(ctx)
     local file = require("file")
     local bin_path = file.join_path(ctx.path, "bin")
@@ -102,6 +111,7 @@ function PLUGIN:EnvKeys(ctx)
         "cd '" .. pyproject_dir .. "' && " .. path_prefix .. "'" .. poetry_bin .. "' env info --path 2>/dev/null"
     )
     if not handle then
+        disable_cache()
         return env_keys
     end
 
@@ -122,6 +132,9 @@ function PLUGIN:EnvKeys(ctx)
         end
 
         if not venv_path or venv_path == "" then
+            -- Poetry couldn't make one. Try again next time rather than keep
+            -- this result, since nothing here would change when it can.
+            disable_cache()
             return env_keys
         end
 
@@ -132,8 +145,16 @@ function PLUGIN:EnvKeys(ctx)
         end
     end
 
+    -- `poetry env use` switches virtualenvs by recording the choice in
+    -- envs.toml, beside the virtualenvs Poetry manages.
+    local watched = { venv_path }
+    local venvs_dir = venv_path:match("^(.*)[/\\][^/\\]+$")
+    if venvs_dir then
+        table.insert(watched, venvs_dir .. "/envs.toml")
+    end
+    watch_files(watched)
+
     -- Set virtualenv environment variables
-    watch_files({ venv_path })
     table.insert(env_keys, { key = "POETRY_ACTIVE", value = "1" })
     table.insert(env_keys, { key = "VIRTUAL_ENV", value = venv_path })
     table.insert(
