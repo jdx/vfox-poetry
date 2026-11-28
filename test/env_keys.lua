@@ -93,6 +93,19 @@ do
     assert(has_key(keys, "VIRTUAL_ENV"), "virtualenv not activated")
 end
 
+-- A quote in the project directory is escaped, so the shell runs Poetry there.
+do
+    local _, _, commands = run("pyproject.toml", { PWD = "/src/O'Brien" }, { ["/src/O'Brien/pyproject.toml"] = true })
+    local poetry = poetry_commands(commands)
+    assert(#poetry > 0, "Poetry did not run")
+    for _, c in ipairs(poetry) do
+        assert(
+            c:find("cd '/src/O'\\''Brien/' && PATH='/mise/python/bin/':\"$PATH\" '/poetry/bin/poetry' ", 1, true) == 1,
+            "unquoted command: " .. c
+        )
+    end
+end
+
 -- The project root wins over PWD.
 do
     local _, opened = run("pyproject.toml", { MISE_PROJECT_ROOT = "/src/app", PWD = "/elsewhere" }, {})
