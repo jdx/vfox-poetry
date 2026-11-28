@@ -2,6 +2,11 @@
 --- Poetry installs its binary to $POETRY_HOME/bin
 --- Also handles virtualenv activation based on pyproject.toml
 
+--- Quotes a string as one POSIX shell word.
+local function sh_quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
 --- Helper function to get mise Python bin directory
 --- Returns the PATH prefix to use, or empty string if not found
 local function get_mise_python_path_prefix()
@@ -19,7 +24,7 @@ local function get_mise_python_path_prefix()
     -- Extract the bin directory from the python path
     local bin_dir = python_path:match("(.*/)")
     if bin_dir then
-        return "PATH='" .. bin_dir .. ":$PATH' "
+        return "PATH=" .. sh_quote(bin_dir) .. ':"$PATH" '
     end
     return ""
 end
@@ -51,10 +56,8 @@ end
 --- The absolute path of the configured pyproject, or nil when there is none.
 --- A relative path means relative to the project, so it is resolved against
 --- the project root only. Without one there is no project to resolve it
---- against: the current directory is not it (mise may run this hook from
---- another directory, and runs the hook's commands from the home directory),
---- so skip virtualenv activation rather than check one directory and run
---- Poetry in another.
+--- against, so skip virtualenv activation rather than check one directory and
+--- run Poetry in another.
 local function resolve_pyproject(pyproject, project_root)
     if is_absolute(pyproject) then
         return pyproject
@@ -67,6 +70,22 @@ local function resolve_pyproject(pyproject, project_root)
     local trailing = RUNTIME.osType == "windows" and "[/\\]$" or "/$"
     local sep = project_root:match(trailing) and "" or "/"
     return project_root .. sep .. pyproject
+end
+
+--- The directory a relative pyproject is resolved against: `MISE_PROJECT_ROOT`
+--- when it is set, otherwise `PWD`, the directory mise runs in. mise sets
+--- neither unless the user trusts that directory, and runs the hook's commands
+--- from the home directory, so the hook's own working directory is never used.
+local function project_root()
+    local root = os.getenv("MISE_PROJECT_ROOT")
+    if root and root ~= "" then
+        return root
+    end
+    local pwd = os.getenv("PWD")
+    if pwd and is_absolute(pwd) then
+        return pwd
+    end
+    return nil
 end
 
 function PLUGIN:EnvKeys(ctx)
@@ -90,7 +109,7 @@ function PLUGIN:EnvKeys(ctx)
         return env_keys
     end
 
-    pyproject = resolve_pyproject(pyproject, os.getenv("MISE_PROJECT_ROOT"))
+    pyproject = resolve_pyproject(pyproject, project_root())
     if not pyproject then
         return env_keys
     end
@@ -130,10 +149,17 @@ function PLUGIN:EnvKeys(ctx)
     local path_prefix = get_mise_python_path_prefix()
 
     -- Get the virtualenv path from poetry
-    local poetry_bin = ctx.path .. "/bin/poetry"
-    local handle = io.popen(
-        "cd '" .. pyproject_dir .. "' && " .. path_prefix .. "'" .. poetry_bin .. "' env info --path 2>/dev/null"
-    )
+    -- Runs Poetry with `args` in the pyproject's directory.
+    local function poetry_cmd(args)
+        return "cd "
+            .. sh_quote(pyproject_dir)
+            .. " && "
+            .. path_prefix
+            .. sh_quote(ctx.path .. "/bin/poetry")
+            .. " "
+            .. args
+    end
+    local handle = io.popen(poetry_cmd("env info --path 2>/dev/null"))
     if not handle then
         disable_cache()
         return env_keys
@@ -144,12 +170,10 @@ function PLUGIN:EnvKeys(ctx)
 
     if not venv_path or venv_path == "" then
         -- Try to create the virtualenv with mise's Python in PATH
-        os.execute("cd '" .. pyproject_dir .. "' && " .. path_prefix .. "'" .. poetry_bin .. "' run true 2>/dev/null")
+        os.execute(poetry_cmd("run true 2>/dev/null"))
 
         -- Try again to get the path
-        handle = io.popen(
-            "cd '" .. pyproject_dir .. "' && " .. path_prefix .. "'" .. poetry_bin .. "' env info --path 2>/dev/null"
-        )
+        handle = io.popen(poetry_cmd("env info --path 2>/dev/null"))
         if handle then
             venv_path = handle:read("*l")
             handle:close()
@@ -165,7 +189,7 @@ function PLUGIN:EnvKeys(ctx)
         -- Auto-install if enabled
         local auto_install = os.getenv("MISE_POETRY_AUTO_INSTALL")
         if auto_install == "1" or auto_install == "true" then
-            os.execute("cd '" .. pyproject_dir .. "' && " .. path_prefix .. "'" .. poetry_bin .. "' install 2>&1")
+            os.execute(poetry_cmd("install 2>&1"))
         end
     end
 
