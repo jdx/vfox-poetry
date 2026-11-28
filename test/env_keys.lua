@@ -101,14 +101,32 @@ do
     assert(opened[1] == "/src/app/pyproject.toml", "unexpected path: " .. opened[1])
 end
 
+-- Outside Windows a trailing backslash is part of the directory name, so a
+-- separator is still added after it.
+do
+    local _, opened = run("pyproject.toml", { MISE_PROJECT_ROOT = "/src/app\\" }, {})
+    assert(opened[1] == "/src/app\\/pyproject.toml", "unexpected path: " .. opened[1])
+end
+
+-- On Windows a trailing backslash is a separator.
+do
+    RUNTIME.osType = "windows"
+    local _, opened = run("pyproject.toml", { MISE_PROJECT_ROOT = "C:\\src\\app\\" }, {})
+    RUNTIME.osType = "linux"
+    assert(opened[1] == "C:\\src\\app\\pyproject.toml", "unexpected path: " .. opened[1])
+end
+
 -- Absolute paths are used as written, whatever the project root.
 for _, path in ipairs({ "/abs/app/pyproject.toml", "C:\\app\\pyproject.toml", "C:/app/pyproject.toml" }) do
-    local _, opened, commands = run(path, { MISE_PROJECT_ROOT = "/src/app" }, { [path] = true })
+    local keys, opened, commands = run(path, { MISE_PROJECT_ROOT = "/src/app" }, { [path] = true })
     assert(opened[1] == path, "absolute pyproject was rewritten: " .. opened[1])
     local dir = path:match("^(.*[/\\])")
-    for _, c in ipairs(poetry_commands(commands)) do
+    local poetry = poetry_commands(commands)
+    assert(#poetry > 0, "Poetry did not run for " .. path)
+    for _, c in ipairs(poetry) do
         assert(c:find("cd '" .. dir .. "' && ", 1, true) == 1, "Poetry ran outside " .. dir .. ": " .. c)
     end
+    assert(has_key(keys, "VIRTUAL_ENV"), "virtualenv not activated for " .. path)
 end
 
 print("env_keys: ok")

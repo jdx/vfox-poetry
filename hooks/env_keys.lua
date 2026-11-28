@@ -62,7 +62,10 @@ local function resolve_pyproject(pyproject, project_root)
     if not project_root or project_root == "" then
         return nil
     end
-    local sep = project_root:match("[/\\]$") and "" or "/"
+    -- A backslash separates directories only on Windows; elsewhere it can be
+    -- part of a directory name.
+    local trailing = RUNTIME.osType == "windows" and "[/\\]$" or "/$"
+    local sep = project_root:match(trailing) and "" or "/"
     return project_root .. sep .. pyproject
 end
 
