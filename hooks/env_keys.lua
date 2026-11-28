@@ -51,10 +51,8 @@ end
 --- The absolute path of the configured pyproject, or nil when there is none.
 --- A relative path means relative to the project, so it is resolved against
 --- the project root only. Without one there is no project to resolve it
---- against: the current directory is not it (mise may run this hook from
---- another directory, and runs the hook's commands from the home directory),
---- so skip virtualenv activation rather than check one directory and run
---- Poetry in another.
+--- against, so skip virtualenv activation rather than check one directory and
+--- run Poetry in another.
 local function resolve_pyproject(pyproject, project_root)
     if is_absolute(pyproject) then
         return pyproject
@@ -67,6 +65,22 @@ local function resolve_pyproject(pyproject, project_root)
     local trailing = RUNTIME.osType == "windows" and "[/\\]$" or "/$"
     local sep = project_root:match(trailing) and "" or "/"
     return project_root .. sep .. pyproject
+end
+
+--- The directory a relative pyproject is resolved against: `MISE_PROJECT_ROOT`
+--- when it is set, otherwise `PWD`, the directory mise runs in. mise sets
+--- neither unless the user trusts that directory, and runs the hook's commands
+--- from the home directory, so the hook's own working directory is never used.
+local function project_root()
+    local root = os.getenv("MISE_PROJECT_ROOT")
+    if root and root ~= "" then
+        return root
+    end
+    local pwd = os.getenv("PWD")
+    if pwd and is_absolute(pwd) then
+        return pwd
+    end
+    return nil
 end
 
 function PLUGIN:EnvKeys(ctx)
@@ -90,7 +104,7 @@ function PLUGIN:EnvKeys(ctx)
         return env_keys
     end
 
-    pyproject = resolve_pyproject(pyproject, os.getenv("MISE_PROJECT_ROOT"))
+    pyproject = resolve_pyproject(pyproject, project_root())
     if not pyproject then
         return env_keys
     end

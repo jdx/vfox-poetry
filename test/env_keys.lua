@@ -69,14 +69,34 @@ local function poetry_commands(commands)
     return out
 end
 
--- A relative pyproject with no project root: nothing to resolve it against,
--- so no file is checked and Poetry never runs.
-do
-    local keys, opened, commands = run("pyproject.toml", {}, { ["pyproject.toml"] = true })
+-- A relative pyproject with no project root or PWD (mise withholds both from
+-- an untrusted directory): nothing to resolve it against, so no file is
+-- checked and Poetry never runs. A relative PWD does not count either.
+for _, env in ipairs({ {}, { PWD = "src/app" } }) do
+    local keys, opened, commands = run("pyproject.toml", env, { ["pyproject.toml"] = true })
     assert(#opened == 0, "a relative pyproject was checked without a project root: " .. tostring(opened[1]))
     assert(#poetry_commands(commands) == 0, "Poetry ran without a project root")
     assert(not has_key(keys, "VIRTUAL_ENV"), "a virtualenv was activated without a project root")
     assert(has_key(keys, "POETRY_HOME"), "the Poetry install itself must still be on the environment")
+end
+
+-- With no project root, a relative pyproject is resolved against PWD, the
+-- directory mise runs in, and Poetry runs there too.
+do
+    local keys, opened, commands = run("pyproject.toml", { PWD = "/src/app" }, { ["/src/app/pyproject.toml"] = true })
+    assert(opened[1] == "/src/app/pyproject.toml", "pyproject not resolved against PWD: " .. tostring(opened[1]))
+    local poetry = poetry_commands(commands)
+    assert(#poetry > 0, "Poetry did not run")
+    for _, c in ipairs(poetry) do
+        assert(c:find("cd '/src/app/' && ", 1, true) == 1, "Poetry ran outside PWD: " .. c)
+    end
+    assert(has_key(keys, "VIRTUAL_ENV"), "virtualenv not activated")
+end
+
+-- The project root wins over PWD.
+do
+    local _, opened = run("pyproject.toml", { MISE_PROJECT_ROOT = "/src/app", PWD = "/elsewhere" }, {})
+    assert(opened[1] == "/src/app/pyproject.toml", "PWD used over the project root: " .. tostring(opened[1]))
 end
 
 -- A relative pyproject with a project root: checked and run in that root.
